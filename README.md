@@ -1,15 +1,4 @@
 # Event-Driven E-commerce Microservices
-
-All services now follow the same source layout as `User-Service`:
-
-- `config/`
-- `controllers/`
-- `events/`
-- `middlewares/`
-- `routes/`
-- `services/`
-- `utils/`
-
 Current services:
 
 - `User-Service` (port `3001`)
@@ -74,8 +63,8 @@ Create `.env` in each service from `.env.example`:
 - `API Gateway`: single entry point, routing, auth forwarding, request validation, rate limit.
 - `Notification-Service`: email/SMS/push notifications (order updates, password reset, welcome events).
 
-Suggested future improvements:
-
+- `Product-Service`: categories + products + product images, with roles (`admin`/`supplier`).
+- `Order-Service`: order lifecycle (`pending`, `paid`, `shipped`, `delivered`, `cancelled`).
 - `Payment-Service` integration (Stripe/Paymob) with payment events.
 - `Inventory-Service` with stock reservation and release on order timeout/cancel.
 - `Search-Service` (Elasticsearch/OpenSearch) for product discovery.
