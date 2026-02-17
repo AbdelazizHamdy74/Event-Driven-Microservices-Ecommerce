@@ -17,9 +17,6 @@ exports.addMyCartItem = async (req, res) => {
   const cart = await addProductToCart({
     userId: Number(req.user.id),
     productId: req.body.productId,
-    productName: req.body.productName,
-    unitPrice: req.body.unitPrice,
-    productImageUrl: req.body.productImageUrl,
     quantity: req.body.quantity ?? 1,
   });
 
