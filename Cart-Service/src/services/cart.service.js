@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const { fetchProductForCart } = require("../utils/productCatalog.client");
 
 const createError = (message, status) => {
   const err = new Error(message);
@@ -57,23 +58,9 @@ const getCartByUserId = async (userId) => {
   };
 };
 
-const addProductToCart = async ({
-  userId,
-  productId,
-  productName,
-  unitPrice,
-  productImageUrl,
-  quantity,
-}) => {
+const addProductToCart = async ({ userId, productId, quantity }) => {
   const normalizedProductId = Number(productId);
   const normalizedQuantity = Number(quantity);
-  const normalizedProductName =
-    typeof productName === "string" ? productName.trim() : "";
-  const normalizedUnitPrice = Number(unitPrice);
-  const normalizedProductImageUrl =
-    typeof productImageUrl === "string" && productImageUrl.trim()
-      ? productImageUrl.trim()
-      : null;
 
   if (!Number.isInteger(normalizedProductId) || normalizedProductId <= 0) {
     throw createError("Invalid productId", 400);
@@ -83,19 +70,21 @@ const addProductToCart = async ({
     throw createError("Quantity must be a positive integer", 400);
   }
 
-  if (!normalizedProductName) {
-    throw createError("productName is required", 400);
+  const productLookup = await fetchProductForCart({
+    productId: normalizedProductId,
+  });
+
+  if (!productLookup.ok || !productLookup.product) {
+    throw createError(
+      productLookup.message || "Product unavailable",
+      Number(productLookup.status) || 404,
+    );
   }
 
-  if (!Number.isFinite(normalizedUnitPrice) || normalizedUnitPrice <= 0) {
-    throw createError("unitPrice must be greater than 0", 400);
-  }
-
-  if (
-    normalizedProductImageUrl &&
-    !/^https?:\/\/.+/i.test(normalizedProductImageUrl)
-  ) {
-    throw createError("productImageUrl must be a valid URL", 400);
+  const product = productLookup.product;
+  const availableStock = Number(product.stockQuantity);
+  if (!Number.isFinite(availableStock) || availableStock <= 0) {
+    throw createError("Product out of stock", 400);
   }
 
   const connection = await db.getConnection();
@@ -127,6 +116,13 @@ const addProductToCart = async ({
     const currentQuantity = itemRows.length ? Number(itemRows[0].quantity) : 0;
     const targetQuantity = currentQuantity + normalizedQuantity;
 
+    if (targetQuantity > availableStock) {
+      throw createError(
+        `Available stock is ${availableStock}, requested ${targetQuantity}`,
+        400,
+      );
+    }
+
     if (itemRows.length) {
       await connection.execute(
         [
@@ -136,9 +132,9 @@ const addProductToCart = async ({
         ].join(" "),
         [
           targetQuantity,
-          Number(normalizedUnitPrice.toFixed(2)),
-          normalizedProductName,
-          normalizedProductImageUrl,
+          Number(product.price),
+          product.name,
+          product.imageUrl,
           itemRows[0].id,
         ],
       );
@@ -152,10 +148,10 @@ const addProductToCart = async ({
         [
           cartId,
           normalizedProductId,
-          normalizedProductName,
-          normalizedProductImageUrl,
+          product.name,
+          product.imageUrl,
           normalizedQuantity,
-          Number(normalizedUnitPrice.toFixed(2)),
+          Number(product.price),
         ],
       );
     }
