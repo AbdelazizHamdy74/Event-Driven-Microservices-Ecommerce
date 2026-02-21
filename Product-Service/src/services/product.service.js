@@ -2,6 +2,9 @@ const db = require("../config/db");
 const { getCategoryById } = require("./category.service");
 const { createError } = require("../utils/errors");
 const { slugify } = require("../utils/slugify");
+const {
+  upsertInventoryStockByProductId,
+} = require("../utils/inventory.client");
 
 const isValidImageUrl = (value) =>
   typeof value === "string" &&
@@ -27,7 +30,10 @@ const normalizeImages = (images) => {
     }
 
     if (!isValidImageUrl(url)) {
-      throw createError("Each product image must be a valid http/https URL", 400);
+      throw createError(
+        "Each product image must be a valid http/https URL",
+        400,
+      );
     }
 
     return {
@@ -83,7 +89,7 @@ const getProductImages = async (productId) => {
   return imageRows;
 };
 
-const createProduct = async (payload, user) => {
+const createProduct = async (payload, user, { authorization } = {}) => {
   const categoryId = Number(payload.categoryId);
   const price = Number(payload.price);
   const stockQuantity = Number.isInteger(payload.stockQuantity)
@@ -123,8 +129,14 @@ const createProduct = async (payload, user) => {
 
   const images = normalizeImages(payload.images);
   const currency = normalizeCurrency(payload.currency);
+  const normalizedDescription =
+    typeof payload.description === "string" ? payload.description.trim() : null;
+  const normalizedPrice = Number(price.toFixed(2));
+  const primaryImage = images.find((image) => image.isPrimary) || images[0];
 
   const connection = await db.getConnection();
+  let createdProductId = null;
+  let inventorySynced = false;
 
   try {
     await connection.beginTransaction();
@@ -149,16 +161,15 @@ const createProduct = async (payload, user) => {
           categoryId,
           normalizedName,
           slug,
-          typeof payload.description === "string"
-            ? payload.description.trim()
-            : null,
-          Number(price.toFixed(2)),
+          normalizedDescription,
+          normalizedPrice,
           currency,
           stockQuantity,
           Number(user.id),
           user.role,
         ],
       );
+      createdProductId = Number(productResult.insertId);
     } catch (err) {
       if (err && err.code === "ER_DUP_ENTRY") {
         throw createError("Product already exists", 409);
@@ -174,7 +185,7 @@ const createProduct = async (payload, user) => {
           "VALUES (?, ?, ?, ?)",
         ].join(" "),
         [
-          productResult.insertId,
+          createdProductId,
           image.imageUrl,
           image.isPrimary ? 1 : 0,
           image.sortOrder,
@@ -182,10 +193,37 @@ const createProduct = async (payload, user) => {
       );
     }
 
+    const inventorySync = await upsertInventoryStockByProductId({
+      authorization,
+      productId: createdProductId,
+      totalQuantity: stockQuantity,
+    });
+    if (!inventorySync.ok) {
+      throw createError(
+        inventorySync.message || "Inventory service unavailable",
+        Number(inventorySync.status) || 502,
+      );
+    }
+    inventorySynced = true;
+
     await connection.commit();
-    return getProductById(productResult.insertId, { onlyActive: false });
+    return getProductById(createdProductId, { onlyActive: false });
   } catch (err) {
     await connection.rollback();
+
+    if (createdProductId && inventorySynced) {
+      const inventoryCleanup = await upsertInventoryStockByProductId({
+        authorization,
+        productId: createdProductId,
+        totalQuantity: 0,
+      });
+      if (!inventoryCleanup.ok) {
+        console.error(
+          `[product-service] failed to cleanup inventory sync for product ${createdProductId}: ${inventoryCleanup.message}`,
+        );
+      }
+    }
+
     throw err;
   } finally {
     connection.release();
@@ -355,9 +393,23 @@ const getProductForCart = async (productId) => {
   };
 };
 
+const getProductSummaryById = async (productId) => {
+  const product = await getProductById(productId, { onlyActive: false });
+  if (!product) return null;
+
+  return {
+    id: Number(product.id),
+    categoryId: Number(product.categoryId),
+    name: product.name,
+    isActive: Boolean(product.isActive),
+    stockQuantity: Number(product.stockQuantity),
+  };
+};
+
 module.exports = {
   createProduct,
   getProductById,
   getProductForCart,
+  getProductSummaryById,
   listProducts,
 };

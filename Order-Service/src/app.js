@@ -4,6 +4,7 @@ const cors = require("cors");
 const { connectConsumer, disconnectConsumer } = require("./config/kafka");
 const { startUserEventsConsumer } = require("./events/userEvents.consumer");
 const orderRoutes = require("./routes/order.routes");
+const internalRoutes = require("./routes/internal.routes");
 const { createObservability } = require("../../shared/http/observability");
 const { createRateLimiter } = require("../../shared/http/rateLimit");
 const { securityHeaders } = require("../../shared/http/security");
@@ -31,6 +32,7 @@ app.get("/health", healthHandler);
 app.get("/metrics", metricsHandler);
 
 app.use("/orders", orderRoutes);
+app.use("/internal", internalRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -2,6 +2,7 @@ const {
   createProduct,
   getProductById,
   getProductForCart,
+  getProductSummaryById,
   listProducts,
 } = require("../services/product.service");
 
@@ -31,7 +32,9 @@ exports.getProductById = async (req, res) => {
 };
 
 exports.createProduct = async (req, res) => {
-  const product = await createProduct(req.body, req.user);
+  const product = await createProduct(req.body, req.user, {
+    authorization: req.headers.authorization,
+  });
   res.status(201).json(product);
 };
 
@@ -47,4 +50,21 @@ exports.getProductForCart = async (req, res) => {
   }
 
   res.json(product);
+};
+
+exports.getProductExistsInternal = async (req, res) => {
+  const productId = Number(req.params.id);
+  if (!Number.isInteger(productId) || productId <= 0) {
+    return res.status(400).json({ message: "Invalid product id" });
+  }
+
+  const product = await getProductSummaryById(productId);
+  if (!product) {
+    return res.status(404).json({ message: "Product not found" });
+  }
+
+  res.json({
+    exists: true,
+    product,
+  });
 };

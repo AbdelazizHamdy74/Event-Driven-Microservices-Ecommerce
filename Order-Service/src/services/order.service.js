@@ -1,5 +1,10 @@
 const db = require("../config/db");
 const { fetchMyCart } = require("../utils/cart.client");
+const {
+  reserveStockForOrder,
+  releaseStockByOrderId,
+  confirmStockByOrderId,
+} = require("../utils/inventory.client");
 const { normalizeRole } = require("../utils/userRole");
 
 const ADMIN_ALLOWED_STATUSES = new Set([
@@ -272,6 +277,8 @@ const createOrderFromCartItem = async ({
   const currency = normalizeCurrency(cart.currency);
 
   const connection = await db.getConnection();
+  let createdOrderId = null;
+  let inventoryReserved = false;
 
   try {
     await connection.beginTransaction();
@@ -294,6 +301,20 @@ const createOrderFromCartItem = async ({
       ].join(" "),
       [userId, currency, 1, lineTotal],
     );
+    createdOrderId = Number(orderResult.insertId);
+
+    const reserveResult = await reserveStockForOrder({
+      orderId: createdOrderId,
+      productId: normalizedProductId,
+      quantity: selectedQuantity,
+    });
+    if (!reserveResult.ok) {
+      throw createError(
+        reserveResult.message || "Inventory reservation failed",
+        Number(reserveResult.status) || 502,
+      );
+    }
+    inventoryReserved = true;
 
     await connection.execute(
       [
@@ -302,7 +323,7 @@ const createOrderFromCartItem = async ({
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
       ].join(" "),
       [
-        orderResult.insertId,
+        createdOrderId,
         normalizedProductId,
         cartItem.productName,
         cartItem.productImageUrl,
@@ -313,13 +334,53 @@ const createOrderFromCartItem = async ({
     );
 
     await connection.commit();
-    return getOrderById(orderResult.insertId);
+    return getOrderById(createdOrderId);
   } catch (err) {
     await connection.rollback();
+
+    if (createdOrderId && inventoryReserved) {
+      const releaseResult = await releaseStockByOrderId({
+        orderId: createdOrderId,
+        reason: "order_create_rollback",
+      });
+
+      if (!releaseResult.ok) {
+        console.error(
+          `[order-service] failed to release reservation for rolled-back order ${createdOrderId}: ${releaseResult.message}`,
+        );
+      }
+    }
+
     throw err;
   } finally {
     connection.release();
   }
+};
+
+const getOrderSummaryById = async (orderId, { executor = db } = {}) => {
+  const normalizedOrderId = toPositiveInt(orderId, "orderId");
+
+  const [rows] = await executor.execute(
+    [
+      "SELECT",
+      "id,",
+      "user_id AS userId,",
+      "status,",
+      "currency,",
+      "items_count AS itemsCount,",
+      "total_amount AS totalAmount,",
+      "cancelled_at AS cancelledAt,",
+      "created_at AS createdAt,",
+      "updated_at AS updatedAt",
+      "FROM orders",
+      "WHERE id = ?",
+      "LIMIT 1",
+    ].join(" "),
+    [normalizedOrderId],
+  );
+
+  if (!rows.length) return null;
+  return mapOrderRow(rows[0]);
 };
 
 const cancelOrder = async ({ orderId, actor }) => {
@@ -364,6 +425,17 @@ const cancelOrder = async ({ orderId, actor }) => {
         ].join(" "),
         [normalizedOrderId],
       );
+
+      const releaseResult = await releaseStockByOrderId({
+        orderId: normalizedOrderId,
+        reason: "order_cancelled",
+      });
+      if (!releaseResult.ok) {
+        throw createError(
+          releaseResult.message || "Failed to release inventory reservation",
+          Number(releaseResult.status) || 502,
+        );
+      }
     }
 
     await connection.commit();
@@ -426,6 +498,17 @@ const updateOrderStatusByAdmin = async ({ orderId, actor, status }) => {
         ].join(" "),
         [normalizedStatus, normalizedOrderId],
       );
+
+      const releaseResult = await releaseStockByOrderId({
+        orderId: normalizedOrderId,
+        reason: "order_cancelled",
+      });
+      if (!releaseResult.ok) {
+        throw createError(
+          releaseResult.message || "Failed to release inventory reservation",
+          Number(releaseResult.status) || 502,
+        );
+      }
     } else {
       await connection.execute(
         [
@@ -435,6 +518,18 @@ const updateOrderStatusByAdmin = async ({ orderId, actor, status }) => {
         ].join(" "),
         [normalizedStatus, normalizedOrderId],
       );
+
+      if (normalizedStatus === "shipped") {
+        const confirmResult = await confirmStockByOrderId({
+          orderId: normalizedOrderId,
+        });
+        if (!confirmResult.ok) {
+          throw createError(
+            confirmResult.message || "Failed to confirm inventory reservation",
+            Number(confirmResult.status) || 502,
+          );
+        }
+      }
     }
 
     await connection.commit();
@@ -451,6 +546,7 @@ module.exports = {
   createOrderFromCartItem,
   listOrdersByUserId,
   getOrderById,
+  getOrderSummaryById,
   getOrderForActor,
   cancelOrder,
   updateOrderStatusByAdmin,

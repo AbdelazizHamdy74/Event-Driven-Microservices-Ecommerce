@@ -16,6 +16,9 @@ Services:
 - Cart Service (`3002`)
 - Order Service (`3003`)
 - Product Service (`3004`)
+- Inventory Service (`3005`)
+
+<!-- - Search Service (`3006`) -->
 
 Each service:
 
@@ -30,6 +33,12 @@ Integration notes:
 - Cart Service and Order Service consume `user-events` and create local user projections
 - Cart Service calls Product Service internal API `GET /internal/products/:id` before adding cart items
 - Order Service calls Cart Service `GET /carts/me` and creates an order only if the selected product already exists in the user's cart
+- Order Service reserves stock in Inventory Service at order creation
+- Order cancel flow releases reserved stock in Inventory Service
+- Order transition to `shipped` confirms reservation and deducts stock in Inventory Service
+- Product creation syncs initial stock to Inventory Service
+
+<!-- - Product creation indexes document in Search Service -->
 
 ---
 
@@ -95,11 +104,15 @@ Kafka topic consumers:
 - `PATCH /orders/:orderId/cancel` (owner or admin, only while order status is `pending`)
 - `PATCH /orders/:orderId/status` (admin only, body: `status` = `paid` | `shipped` | `delivered` | `cancelled`)
 - `GET /orders/user/:userId` (owner or admin)
+- `GET /internal/orders/:orderId/exists` (service-to-service existence check)
 
 Order Service env vars:
 
 - `CART_SERVICE_URL` (default: `http://localhost:3002`)
 - `CART_TIMEOUT_MS` (default: `4000`)
+- `INVENTORY_SERVICE_URL` (default: `http://localhost:3005`)
+- `INVENTORY_TIMEOUT_MS` (default: `4000`)
+- `INVENTORY_RESERVATION_TTL_SECONDS` (default: `900`)
 
 Order lifecycle values in schema:
 
@@ -123,6 +136,48 @@ Allowed status transitions for admin route:
 - `GET /products/:id`
 - `POST /products` (`admin` or `supplier`)
 - `GET /internal/products/:id` (service-to-service endpoint used by Cart Service)
+- `GET /internal/products/:id/exists` (service-to-service existence check)
+
+Product Service sync integrations:
+
+- Inventory Service: initializes stock at product creation
+
+<!-- - Search Service: upserts product search document at product creation -->
+
+Product Service env vars:
+
+- `INVENTORY_SERVICE_URL` (default: `http://localhost:3005`)
+- `INVENTORY_TIMEOUT_MS` (default: `4000`)
+
+<!-- - `SEARCH_SERVICE_URL` (default: `http://localhost:3006`) -->
+
+<!-- - `SEARCH_TIMEOUT_MS` (default: `4000`) -->
+
+### Inventory Service (`http://localhost:3005`)
+
+- `GET /inventory/:productId`
+- `PUT /inventory/:productId/stock` (`admin` or `supplier`, body: `totalQuantity`)
+- `POST /internal/reservations` (internal, body: `orderId`, `productId`, `quantity`, optional `expiresAt`)
+- `POST /internal/reservations/:reservationId/release` (internal, optional body: `reason`)
+- `POST /internal/orders/:orderId/release` (internal, optional body: `reason`)
+- `POST /internal/orders/:orderId/confirm` (internal)
+- `POST /internal/reservations/release-expired` (internal)
+
+Inventory timeout sweep env var:
+
+- `RESERVATION_SWEEP_INTERVAL_MS` (default: `60000`)
+- `ORDER_SERVICE_URL` (default: `http://localhost:3003`)
+- `ORDER_TIMEOUT_MS` (default: `3000`)
+- `PRODUCT_SERVICE_URL` (default: `http://localhost:3004`)
+- `PRODUCT_TIMEOUT_MS` (default: `3000`)
+
+<!-- ### Search Service (`http://localhost:3006`)
+
+- `GET /search/products` (query: `q`, `categoryId`, `minPrice`, `maxPrice`, `inStock`, `page`, `pageSize`)
+- `PUT /internal/products/:productId` (`admin` or `supplier`, upsert indexed document)
+- `DELETE /internal/products/:productId` (`admin` or `supplier`, remove indexed document)
+
+Search Service currently uses a MySQL-backed index table and is structured to be replaceable by Elasticsearch/OpenSearch later. -->
 
 Internal services remain available on their own ports for service-to-service calls.
 
@@ -136,6 +191,9 @@ Applied to all HTTP services:
 - Cart Service
 - Order Service
 - Product Service
+- Inventory Service
+
+<!-- - Search Service -->
 
 ### Observability
 
@@ -213,6 +271,9 @@ Apply each service schema in its own database:
 - `Cart-Service/schema.sql`
 - `Order-Service/schema.sql`
 - `Product-Service/schema.sql`
+- `Inventory-Service/schema.sql`
+
+<!-- - `Search-Service/schema.sql` -->
 
 ---
 
@@ -221,8 +282,6 @@ Apply each service schema in its own database:
 - API Gateway as a single entry point for routing and auth forwarding
 - Notification Service for email/SMS/push updates
 - Payment Service integration (Stripe/Paymob) with payment events
-- Inventory Service with stock reservation and release on order timeout/cancel
-- Search Service (Elasticsearch/OpenSearch) for product discovery
 - Audit/Activity Service for admin actions and critical domain events
 - Centralized tracing/logging stack (OpenTelemetry + Grafana/Prometheus + ELK)
 
@@ -238,16 +297,27 @@ Apply each service schema in its own database:
    - `Cart-Service/.env`
    - `Order-Service/.env`
    - `Product-Service/.env`
+   - `Inventory-Service/.env`
+
+   <!-- - `Search-Service/.env` -->
+
 5. Run HTTP services:
    - `User-Service`
    - `Cart-Service`
    - `Order-Service`
    - `Product-Service`
+   - `Inventory-Service`
+
+   <!-- - `Search-Service` -->
+
 6. Verify health checks:
    - `GET http://localhost:3001/health`
    - `GET http://localhost:3002/health`
    - `GET http://localhost:3003/health`
    - `GET http://localhost:3004/health`
+   - `GET http://localhost:3005/health`
+
+   <!-- - `GET http://localhost:3006/health` -->
 
 Run commands:
 
@@ -256,4 +326,6 @@ cd User-Service && npm install && npm run dev
 cd Cart-Service && npm install && npm run dev
 cd Order-Service && npm install && npm run dev
 cd Product-Service && npm install && npm run dev
+cd Inventory-Service && npm install && npm run dev
+<!-- cd Search-Service && npm install && npm run dev -->
 ```

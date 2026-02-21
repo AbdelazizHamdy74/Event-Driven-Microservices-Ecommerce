@@ -1,6 +1,7 @@
 const {
   createOrderFromCartItem,
   listOrdersByUserId,
+  getOrderSummaryById,
   getOrderForActor,
   cancelOrder,
   updateOrderStatusByAdmin,
@@ -83,4 +84,21 @@ exports.updateOrderStatusByAdmin = async (req, res) => {
   });
 
   res.json(order);
+};
+
+exports.getOrderExistsInternal = async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ message: "Invalid orderId" });
+  }
+
+  const order = await getOrderSummaryById(orderId);
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+
+  res.json({
+    exists: true,
+    order,
+  });
 };
