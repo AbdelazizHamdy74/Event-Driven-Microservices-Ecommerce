@@ -6,6 +6,11 @@ const {
   upsertInventoryStockByProductId,
 } = require("../utils/inventory.client");
 
+// Search-Service integration is temporarily disabled for phased deployment.
+const {
+  upsertSearchProductDocument,
+  deleteSearchProductDocument,
+} = require("../utils/search.client");
 const isValidImageUrl = (value) =>
   typeof value === "string" &&
   /^https?:\/\/.+/i.test(value.trim()) &&
@@ -206,10 +211,43 @@ const createProduct = async (payload, user, { authorization } = {}) => {
     }
     inventorySynced = true;
 
+    // Search-Service integration is temporarily disabled for phased deployment.
+    const searchSync = await upsertSearchProductDocument({
+      authorization,
+      productId: createdProductId,
+      categoryId: category.id,
+      categoryName: category.name,
+      name: normalizedName,
+      description: normalizedDescription,
+      price: normalizedPrice,
+      currency,
+      stockQuantity,
+      isActive: true,
+      primaryImageUrl: primaryImage?.imageUrl || null,
+    });
+    if (!searchSync.ok) {
+      throw createError(
+        searchSync.message || "Search service unavailable",
+        Number(searchSync.status) || 502,
+      );
+    }
     await connection.commit();
     return getProductById(createdProductId, { onlyActive: false });
   } catch (err) {
     await connection.rollback();
+
+    // Search-Service integration is temporarily disabled for phased deployment.
+    if (createdProductId) {
+      const searchCleanup = await deleteSearchProductDocument({
+        authorization,
+        productId: createdProductId,
+      });
+      if (!searchCleanup.ok) {
+        console.error(
+          `[product-service] failed to cleanup search index for product ${createdProductId}: ${searchCleanup.message}`,
+        );
+      }
+    }
 
     if (createdProductId && inventorySynced) {
       const inventoryCleanup = await upsertInventoryStockByProductId({
