@@ -17,8 +17,8 @@ Services:
 - Order Service (`3003`)
 - Product Service (`3004`)
 - Inventory Service (`3005`)
-
-<!-- - Search Service (`3006`) -->
+- Search Service (`3006`)
+- Payment Service (`3007`)
 
 Each service:
 
@@ -30,15 +30,16 @@ Each service:
 Integration notes:
 
 - User Service publishes `USER_CREATED` on Kafka topic `user-events`
-- Cart Service and Order Service consume `user-events` and create local user projections
+- Cart Service, Order Service, and Payment Service consume `user-events` and create local user projections
 - Cart Service calls Product Service internal API `GET /internal/products/:id` before adding cart items
 - Order Service calls Cart Service `GET /carts/me` and creates an order only if the selected product already exists in the user's cart
 - Order Service reserves stock in Inventory Service at order creation
 - Order cancel flow releases reserved stock in Inventory Service
 - Order transition to `shipped` confirms reservation and deducts stock in Inventory Service
 - Product creation syncs initial stock to Inventory Service
-
-<!-- - Product creation indexes document in Search Service -->
+- Product creation upserts product document in Search Service
+- Payment Service validates order existence via Order Service internal API and marks order as `paid` after successful charge
+- Payment Service publishes payment lifecycle events to Kafka topic `payment-events`
 
 ---
 
@@ -47,11 +48,16 @@ Integration notes:
 Published events:
 
 - `USER_CREATED`
+- `PAYMENT_CREATED`
+- `PAYMENT_SUCCEEDED`
+- `PAYMENT_FAILED`
 
 Kafka topic consumers:
 
 - `user-events` -> Cart Service
 - `user-events` -> Order Service
+- `user-events` -> Payment Service
+- `payment-events` -> available for Notification/Audit/Analytics consumers
 
 `USER_CREATED` payload example:
 
@@ -68,6 +74,34 @@ Kafka topic consumers:
     "email": "alice@example.com",
     "role": "user",
     "accountStatus": "active"
+  }
+}
+```
+
+`PAYMENT_SUCCEEDED` payload example:
+
+```json
+{
+  "eventId": "uuid",
+  "eventType": "PAYMENT_SUCCEEDED",
+  "eventVersion": 1,
+  "occurredAt": "2026-02-23T10:30:00.000Z",
+  "producer": "payment-service",
+  "data": {
+    "paymentId": 12,
+    "orderId": 101,
+    "userId": 7,
+    "provider": "stripe",
+    "providerPaymentId": "pi_123456",
+    "status": "succeeded",
+    "currency": "USD",
+    "amount": 89.99,
+    "failureReason": null,
+    "orderSync": {
+      "ok": true,
+      "status": 200,
+      "fromExistingPayment": false
+    }
   }
 }
 ```
@@ -105,6 +139,7 @@ Kafka topic consumers:
 - `PATCH /orders/:orderId/status` (admin only, body: `status` = `paid` | `shipped` | `delivered` | `cancelled`)
 - `GET /orders/user/:userId` (owner or admin)
 - `GET /internal/orders/:orderId/exists` (service-to-service existence check)
+- `POST /internal/orders/:orderId/mark-paid` (service-to-service endpoint used by Payment Service)
 
 Order Service env vars:
 
@@ -141,17 +176,14 @@ Allowed status transitions for admin route:
 Product Service sync integrations:
 
 - Inventory Service: initializes stock at product creation
-
-<!-- - Search Service: upserts product search document at product creation -->
+- Search Service: upserts product search document at product creation
 
 Product Service env vars:
 
 - `INVENTORY_SERVICE_URL` (default: `http://localhost:3005`)
 - `INVENTORY_TIMEOUT_MS` (default: `4000`)
-
-<!-- - `SEARCH_SERVICE_URL` (default: `http://localhost:3006`) -->
-
-<!-- - `SEARCH_TIMEOUT_MS` (default: `4000`) -->
+- `SEARCH_SERVICE_URL` (default: `http://localhost:3006`)
+- `SEARCH_TIMEOUT_MS` (default: `4000`)
 
 ### Inventory Service (`http://localhost:3005`)
 
@@ -171,13 +203,36 @@ Inventory timeout sweep env var:
 - `PRODUCT_SERVICE_URL` (default: `http://localhost:3004`)
 - `PRODUCT_TIMEOUT_MS` (default: `3000`)
 
-<!-- ### Search Service (`http://localhost:3006`)
+### Search Service (`http://localhost:3006`)
 
 - `GET /search/products` (query: `q`, `categoryId`, `minPrice`, `maxPrice`, `inStock`, `page`, `pageSize`)
 - `PUT /internal/products/:productId` (`admin` or `supplier`, upsert indexed document)
 - `DELETE /internal/products/:productId` (`admin` or `supplier`, remove indexed document)
 
-Search Service currently uses a MySQL-backed index table and is structured to be replaceable by Elasticsearch/OpenSearch later. -->
+Search Service currently uses a MySQL-backed index table and is structured to be replaceable by Elasticsearch/OpenSearch later.
+
+### Payment Service (`http://localhost:3007`)
+
+- `POST /payments/me/orders/:orderId/charge` (authenticated `user`, body: optional `provider` = `stripe` | `paymob`, optional `paymentMethod`, optional `paymentToken`, optional `metadata`)
+- `GET /payments/me` (authenticated user)
+- `GET /payments/:paymentId` (owner or admin)
+- `GET /internal/orders/:orderId/payments` (service-to-service payment lookup)
+
+Payment Service integrations:
+
+- Order Service: verifies order with `GET /internal/orders/:orderId/exists`
+- Order Service: sets order status to paid with `POST /internal/orders/:orderId/mark-paid`
+- Kafka: publishes `PAYMENT_CREATED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED` on `payment-events`
+
+Payment Service env vars:
+
+- `ORDER_SERVICE_URL` (default: `http://localhost:3003`)
+- `ORDER_TIMEOUT_MS` (default: `4000`)
+- `PAYMENT_PROVIDER` (default: `stripe`, allowed: `stripe` | `paymob`)
+- `PAYMENT_PROVIDER_DELAY_MS` (default: `0`)
+- `KAFKA_PAYMENT_EVENTS_TOPIC` (default: `payment-events`)
+- `KAFKA_USER_EVENTS_TOPIC` (default: `user-events`)
+- `AUTH_TIMEOUT_MS` (default: `3000`)
 
 Internal services remain available on their own ports for service-to-service calls.
 
@@ -192,8 +247,8 @@ Applied to all HTTP services:
 - Order Service
 - Product Service
 - Inventory Service
-
-<!-- - Search Service -->
+- Search Service
+- Payment Service
 
 ### Observability
 
@@ -272,8 +327,8 @@ Apply each service schema in its own database:
 - `Order-Service/schema.sql`
 - `Product-Service/schema.sql`
 - `Inventory-Service/schema.sql`
-
-<!-- - `Search-Service/schema.sql` -->
+- `Search-Service/schema.sql`
+- `Payment-Service/schema.sql`
 
 ---
 
@@ -281,9 +336,9 @@ Apply each service schema in its own database:
 
 - API Gateway as a single entry point for routing and auth forwarding
 - Notification Service for email/SMS/push updates
-- Payment Service integration (Stripe/Paymob) with payment events
 - Audit/Activity Service for admin actions and critical domain events
 - Centralized tracing/logging stack (OpenTelemetry + Grafana/Prometheus + ELK)
+- Fraud/Risk scoring workflow for suspicious orders and payments
 
 ---
 
@@ -298,8 +353,8 @@ Apply each service schema in its own database:
    - `Order-Service/.env`
    - `Product-Service/.env`
    - `Inventory-Service/.env`
-
-   <!-- - `Search-Service/.env` -->
+   - `Search-Service/.env`
+   - `Payment-Service/.env`
 
 5. Run HTTP services:
    - `User-Service`
@@ -307,8 +362,8 @@ Apply each service schema in its own database:
    - `Order-Service`
    - `Product-Service`
    - `Inventory-Service`
-
-   <!-- - `Search-Service` -->
+   - `Search-Service`
+   - `Payment-Service`
 
 6. Verify health checks:
    - `GET http://localhost:3001/health`
@@ -316,8 +371,8 @@ Apply each service schema in its own database:
    - `GET http://localhost:3003/health`
    - `GET http://localhost:3004/health`
    - `GET http://localhost:3005/health`
-
-   <!-- - `GET http://localhost:3006/health` -->
+   - `GET http://localhost:3006/health`
+   - `GET http://localhost:3007/health`
 
 Run commands:
 
@@ -327,5 +382,6 @@ cd Cart-Service && npm install && npm run dev
 cd Order-Service && npm install && npm run dev
 cd Product-Service && npm install && npm run dev
 cd Inventory-Service && npm install && npm run dev
-<!-- cd Search-Service && npm install && npm run dev -->
+cd Search-Service && npm install && npm run dev
+cd Payment-Service && npm install && npm run dev
 ```

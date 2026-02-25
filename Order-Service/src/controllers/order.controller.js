@@ -5,6 +5,7 @@ const {
   getOrderForActor,
   cancelOrder,
   updateOrderStatusByAdmin,
+  markOrderPaidByPayment,
 } = require("../services/order.service");
 
 exports.createMyOrder = async (req, res) => {
@@ -101,4 +102,20 @@ exports.getOrderExistsInternal = async (req, res) => {
     exists: true,
     order,
   });
+};
+
+exports.markOrderPaidInternal = async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ message: "Invalid orderId" });
+  }
+
+  const result = await markOrderPaidByPayment({
+    orderId,
+    paymentId: req.body.paymentId,
+    provider: req.body.provider,
+    providerPaymentId: req.body.providerPaymentId,
+  });
+
+  res.json(result);
 };

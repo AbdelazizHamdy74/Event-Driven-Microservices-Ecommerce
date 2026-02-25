@@ -542,6 +542,77 @@ const updateOrderStatusByAdmin = async ({ orderId, actor, status }) => {
   }
 };
 
+const markOrderPaidByPayment = async ({
+  orderId,
+  paymentId,
+  provider,
+  providerPaymentId,
+}) => {
+  const normalizedOrderId = toPositiveInt(orderId, "orderId");
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.execute(
+      [
+        "SELECT id, status",
+        "FROM orders",
+        "WHERE id = ?",
+        "LIMIT 1 FOR UPDATE",
+      ].join(" "),
+      [normalizedOrderId],
+    );
+
+    if (!rows.length) {
+      throw createError("Order not found", 404);
+    }
+
+    const currentStatus = rows[0].status;
+    if (currentStatus === "paid" ||
+      currentStatus === "shipped" ||
+      currentStatus === "delivered") {
+      await connection.commit();
+      return {
+        updated: false,
+        order: await getOrderById(normalizedOrderId),
+      };
+    }
+
+    if (currentStatus !== "pending") {
+      throw createError(
+        `Cannot mark order as paid from status ${currentStatus}`,
+        409,
+      );
+    }
+
+    await connection.execute(
+      [
+        "UPDATE orders",
+        "SET status = 'paid', cancelled_at = NULL",
+        "WHERE id = ?",
+      ].join(" "),
+      [normalizedOrderId],
+    );
+
+    await connection.commit();
+
+    console.log(
+      `[order-service] internal mark-paid orderId=${normalizedOrderId} paymentId=${paymentId || "n/a"} provider=${provider || "n/a"} providerPaymentId=${providerPaymentId || "n/a"}`,
+    );
+
+    return {
+      updated: true,
+      order: await getOrderById(normalizedOrderId),
+    };
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+};
+
 module.exports = {
   createOrderFromCartItem,
   listOrdersByUserId,
@@ -550,4 +621,5 @@ module.exports = {
   getOrderForActor,
   cancelOrder,
   updateOrderStatusByAdmin,
+  markOrderPaidByPayment,
 };
