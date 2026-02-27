@@ -19,6 +19,7 @@ Services:
 - Inventory Service (`3005`)
 - Search Service (`3006`)
 - Payment Service (`3007`)
+- Notification Service (`3008`)
 
 Each service:
 
@@ -30,7 +31,7 @@ Each service:
 Integration notes:
 
 - User Service publishes `USER_CREATED` on Kafka topic `user-events`
-- Cart Service, Order Service, and Payment Service consume `user-events` and create local user projections
+- Cart Service, Order Service, Payment Service, and Notification Service consume `user-events` and create local user projections
 - Cart Service calls Product Service internal API `GET /internal/products/:id` before adding cart items
 - Order Service calls Cart Service `GET /carts/me` and creates an order only if the selected product already exists in the user's cart
 - Order Service reserves stock in Inventory Service at order creation
@@ -40,6 +41,7 @@ Integration notes:
 - Product creation upserts product document in Search Service
 - Payment Service validates order existence via Order Service internal API and marks order as `paid` after successful charge
 - Payment Service publishes payment lifecycle events to Kafka topic `payment-events`
+- Notification Service consumes `payment-events` and stores delivery records for `email`, `sms`, and `push` channels
 
 ---
 
@@ -57,7 +59,9 @@ Kafka topic consumers:
 - `user-events` -> Cart Service
 - `user-events` -> Order Service
 - `user-events` -> Payment Service
-- `payment-events` -> available for Notification/Audit/Analytics consumers
+- `user-events` -> Notification Service
+- `payment-events` -> Notification Service
+- `payment-events` -> available for Audit/Analytics consumers
 
 `USER_CREATED` payload example:
 
@@ -234,6 +238,25 @@ Payment Service env vars:
 - `KAFKA_USER_EVENTS_TOPIC` (default: `user-events`)
 - `AUTH_TIMEOUT_MS` (default: `3000`)
 
+### Notification Service (`http://localhost:3008`)
+
+- `GET /notifications/me` (authenticated user, optional query: `limit`)
+- `PATCH /notifications/me/:notificationId/read` (authenticated user)
+- `GET /notifications/user/:userId` (owner or admin, optional query: `limit`)
+
+Notification Service integrations:
+
+- Kafka `user-events`: consumes `USER_CREATED` and upserts notification user projections
+- Kafka `payment-events`: consumes `PAYMENT_CREATED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED` and creates channel notifications (`email`, `sms`, `push`)
+
+Notification Service env vars:
+
+- `KAFKA_USER_EVENTS_TOPIC` (default: `user-events`)
+- `KAFKA_PAYMENT_EVENTS_TOPIC` (default: `payment-events`)
+- `NOTIFICATION_CHANNELS` (default: `email,sms,push`)
+- `USER_SERVICE_URL` (default: `http://localhost:3001`)
+- `AUTH_TIMEOUT_MS` (default: `3000`)
+
 Internal services remain available on their own ports for service-to-service calls.
 
 ---
@@ -249,6 +272,7 @@ Applied to all HTTP services:
 - Inventory Service
 - Search Service
 - Payment Service
+- Notification Service
 
 ### Observability
 
@@ -329,13 +353,13 @@ Apply each service schema in its own database:
 - `Inventory-Service/schema.sql`
 - `Search-Service/schema.sql`
 - `Payment-Service/schema.sql`
+- `Notification-Service/schema.sql`
 
 ---
 
 ## Future Features
 
 - API Gateway as a single entry point for routing and auth forwarding
-- Notification Service for email/SMS/push updates
 - Audit/Activity Service for admin actions and critical domain events
 - Centralized tracing/logging stack (OpenTelemetry + Grafana/Prometheus + ELK)
 - Fraud/Risk scoring workflow for suspicious orders and payments
@@ -355,6 +379,7 @@ Apply each service schema in its own database:
    - `Inventory-Service/.env`
    - `Search-Service/.env`
    - `Payment-Service/.env`
+   - `Notification-Service/.env`
 
 5. Run HTTP services:
    - `User-Service`
@@ -364,6 +389,7 @@ Apply each service schema in its own database:
    - `Inventory-Service`
    - `Search-Service`
    - `Payment-Service`
+   - `Notification-Service`
 
 6. Verify health checks:
    - `GET http://localhost:3001/health`
@@ -373,6 +399,7 @@ Apply each service schema in its own database:
    - `GET http://localhost:3005/health`
    - `GET http://localhost:3006/health`
    - `GET http://localhost:3007/health`
+   - `GET http://localhost:3008/health`
 
 Run commands:
 
@@ -384,4 +411,5 @@ cd Product-Service && npm install && npm run dev
 cd Inventory-Service && npm install && npm run dev
 cd Search-Service && npm install && npm run dev
 cd Payment-Service && npm install && npm run dev
+cd Notification-Service && npm install && npm run dev
 ```
