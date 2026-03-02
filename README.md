@@ -20,6 +20,7 @@ Services:
 - Search Service (`3006`)
 - Payment Service (`3007`)
 - Notification Service (`3008`)
+- Audit Service (`3009`)
 
 Each service:
 
@@ -42,6 +43,7 @@ Integration notes:
 - Payment Service validates order existence via Order Service internal API and marks order as `paid` after successful charge
 - Payment Service publishes payment lifecycle events to Kafka topic `payment-events`
 - Notification Service consumes `payment-events` and stores delivery records for `email`, `sms`, and `push` channels
+- Audit Service consumes `user-events` and `payment-events`, and all services forward HTTP activity/admin actions to Audit Service via `/internal/audit-logs`
 
 ---
 
@@ -60,8 +62,9 @@ Kafka topic consumers:
 - `user-events` -> Order Service
 - `user-events` -> Payment Service
 - `user-events` -> Notification Service
+- `user-events` -> Audit Service
 - `payment-events` -> Notification Service
-- `payment-events` -> available for Audit/Analytics consumers
+- `payment-events` -> Audit Service
 
 `USER_CREATED` payload example:
 
@@ -257,6 +260,27 @@ Notification Service env vars:
 - `USER_SERVICE_URL` (default: `http://localhost:3001`)
 - `AUTH_TIMEOUT_MS` (default: `3000`)
 
+### Audit Service (`http://localhost:3009`)
+
+- `GET /audit/logs` (admin only, query: `page`, `limit`, `logType`, `serviceName`, `actorUserId`, `actorRole`, `severity`, `httpMethod`, `httpStatus`, `eventType`, `from`, `to`, `q`)
+- `GET /audit/logs/me` (authenticated user, query filters supported)
+- `POST /internal/audit-logs` (internal activity ingest endpoint used by all services)
+
+Audit Service integrations:
+
+- Kafka `user-events`: consumes domain events (`USER_CREATED`, and future user domain events)
+- Kafka `payment-events`: consumes payment domain events (`PAYMENT_CREATED`, `PAYMENT_SUCCEEDED`, `PAYMENT_FAILED`)
+- HTTP activity stream: receives request/activity records from all services through shared observability middleware
+
+Audit Service env vars:
+
+- `KAFKA_USER_EVENTS_TOPIC` (default: `user-events`)
+- `KAFKA_PAYMENT_EVENTS_TOPIC` (default: `payment-events`)
+- `KAFKA_AUDIT_EXTRA_TOPICS` (optional comma-separated topic list)
+- `USER_SERVICE_URL` (default: `http://localhost:3001`)
+- `AUTH_TIMEOUT_MS` (default: `3000`)
+- `AUDIT_INTERNAL_TOKEN` (optional shared token for `/internal/audit-logs`)
+
 Internal services remain available on their own ports for service-to-service calls.
 
 ---
@@ -273,6 +297,7 @@ Applied to all HTTP services:
 - Search Service
 - Payment Service
 - Notification Service
+- Audit Service
 
 ### Observability
 
@@ -280,6 +305,7 @@ Applied to all HTTP services:
 - Response header `X-Request-Id`
 - `GET /health` for liveness checks
 - `GET /metrics` for lightweight runtime counters and memory usage
+- Automatic activity forwarding to Audit Service (`POST /internal/audit-logs`) for admin actions and request-level activity trail
 
 ### Rate Limiting
 
@@ -295,6 +321,10 @@ Environment variables:
 
 - `RATE_LIMIT_WINDOW_MS` (default: `60000`)
 - `RATE_LIMIT_MAX` (default: `120`)
+- `AUDIT_SERVICE_URL` (default: `http://localhost:3009`)
+- `AUDIT_ACTIVITY_ENABLED` (default: `true`)
+- `AUDIT_TIMEOUT_MS` (default: `800`)
+- `AUDIT_INTERNAL_TOKEN` (optional; if set it is sent as `x-audit-token`)
 
 ### Security Enhancements
 
@@ -354,13 +384,13 @@ Apply each service schema in its own database:
 - `Search-Service/schema.sql`
 - `Payment-Service/schema.sql`
 - `Notification-Service/schema.sql`
+- `Audit-Service/schema.sql`
 
 ---
 
 ## Future Features
 
 - API Gateway as a single entry point for routing and auth forwarding
-- Audit/Activity Service for admin actions and critical domain events
 - Centralized tracing/logging stack (OpenTelemetry + Grafana/Prometheus + ELK)
 - Fraud/Risk scoring workflow for suspicious orders and payments
 
@@ -380,6 +410,7 @@ Apply each service schema in its own database:
    - `Search-Service/.env`
    - `Payment-Service/.env`
    - `Notification-Service/.env`
+   - `Audit-Service/.env`
 
 5. Run HTTP services:
    - `User-Service`
@@ -390,6 +421,7 @@ Apply each service schema in its own database:
    - `Search-Service`
    - `Payment-Service`
    - `Notification-Service`
+   - `Audit-Service`
 
 6. Verify health checks:
    - `GET http://localhost:3001/health`
@@ -400,6 +432,7 @@ Apply each service schema in its own database:
    - `GET http://localhost:3006/health`
    - `GET http://localhost:3007/health`
    - `GET http://localhost:3008/health`
+   - `GET http://localhost:3009/health`
 
 Run commands:
 
@@ -412,4 +445,5 @@ cd Inventory-Service && npm install && npm run dev
 cd Search-Service && npm install && npm run dev
 cd Payment-Service && npm install && npm run dev
 cd Notification-Service && npm install && npm run dev
+cd Audit-Service && npm install && npm run dev
 ```

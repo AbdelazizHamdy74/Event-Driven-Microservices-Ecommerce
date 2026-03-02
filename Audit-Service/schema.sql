@@ -1,0 +1,45 @@
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  log_type ENUM('activity', 'domain_event') NOT NULL DEFAULT 'activity',
+  service_name VARCHAR(80) NOT NULL,
+  action VARCHAR(180) NOT NULL,
+  actor_user_id INT NULL,
+  actor_role ENUM('anonymous', 'user', 'admin', 'supplier', 'system')
+    NOT NULL DEFAULT 'anonymous',
+  target_type VARCHAR(80) NULL,
+  target_id VARCHAR(120) NULL,
+  severity ENUM('info', 'warning', 'critical') NOT NULL DEFAULT 'info',
+  http_method VARCHAR(10) NULL,
+  http_path VARCHAR(255) NULL,
+  http_status SMALLINT NULL,
+  request_id VARCHAR(64) NULL,
+  duration_ms DECIMAL(10, 3) NULL,
+  source_topic VARCHAR(120) NULL,
+  source_partition INT NULL,
+  source_offset VARCHAR(64) NULL,
+  source_event_id VARCHAR(128) NULL,
+  source_event_type VARCHAR(80) NULL,
+  source_event_version INT NULL,
+  source_occurred_at DATETIME NULL,
+  metadata JSON NULL,
+  payload JSON NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_created_at (created_at),
+  INDEX idx_audit_log_type_created_at (log_type, created_at),
+  INDEX idx_audit_service_created_at (service_name, created_at),
+  INDEX idx_audit_actor_created_at (actor_user_id, created_at),
+  INDEX idx_audit_http_status (http_status),
+  INDEX idx_audit_source_event_type (source_event_type),
+  UNIQUE KEY uniq_audit_domain_offset (
+    source_topic,
+    source_partition,
+    source_offset
+  ),
+  UNIQUE KEY uniq_audit_activity_request (
+    service_name,
+    request_id,
+    http_method,
+    http_path,
+    http_status
+  )
+);

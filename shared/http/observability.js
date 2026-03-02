@@ -1,4 +1,7 @@
-const createObservability = (serviceName) => {
+const { publishActivityLog } = require("./auditActivity");
+
+const createObservability = (serviceName, options = {}) => {
+  const disableAuditActivity = Boolean(options.disableAuditActivity);
   const startedAt = Date.now();
   let requestsTotal = 0;
   let errorsTotal = 0;
@@ -28,6 +31,16 @@ const createObservability = (serviceName) => {
           1,
         )}ms requestId=${requestId}`,
       );
+
+      if (!disableAuditActivity) {
+        publishActivityLog({
+          serviceName,
+          req,
+          statusCode,
+          durationMs: elapsedMs,
+          requestId,
+        }).catch(() => {});
+      }
     });
 
     next();
