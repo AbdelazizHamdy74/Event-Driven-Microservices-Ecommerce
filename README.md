@@ -12,6 +12,7 @@ event-driven.
 
 Services:
 
+- API Gateway (`3000`)
 - User Service (`3001`)
 - Cart Service (`3002`)
 - Order Service (`3003`)
@@ -31,6 +32,7 @@ Each service:
 
 Integration notes:
 
+- API Gateway is the single external entry point, routes requests to downstream services, validates protected sessions, and forwards auth/user context headers
 - User Service publishes `USER_CREATED` on Kafka topic `user-events`
 - Cart Service, Order Service, Payment Service, and Notification Service consume `user-events` and create local user projections
 - Cart Service calls Product Service internal API `GET /internal/products/:id` before adding cart items
@@ -116,6 +118,38 @@ Kafka topic consumers:
 ---
 
 ## Service Endpoints
+
+### API Gateway (`http://localhost:3000`)
+
+- Public API entry point for all client-facing routes:
+  - User/Auth: `/auth/*`, `/users/*`
+  - Cart: `/carts/*`
+  - Order: `/orders/*`
+  - Product/Categories: `/products/*`, `/categories/*`
+  - Inventory: `/inventory/*`
+  - Search: `/search/*`
+  - Payment: `/payments/*`
+  - Notification: `/notifications/*`
+  - Audit (read): `/audit/*`
+- `GET /health`
+- `GET /metrics`
+- Internal routes containing `/internal` are blocked by default (`EXPOSE_INTERNAL_ROUTES=false`)
+
+API Gateway env vars:
+
+- `PORT` (default: `3000`)
+- `USER_SERVICE_URL` (default: `http://localhost:3001`)
+- `CART_SERVICE_URL` (default: `http://localhost:3002`)
+- `ORDER_SERVICE_URL` (default: `http://localhost:3003`)
+- `PRODUCT_SERVICE_URL` (default: `http://localhost:3004`)
+- `INVENTORY_SERVICE_URL` (default: `http://localhost:3005`)
+- `SEARCH_SERVICE_URL` (default: `http://localhost:3006`)
+- `PAYMENT_SERVICE_URL` (default: `http://localhost:3007`)
+- `NOTIFICATION_SERVICE_URL` (default: `http://localhost:3008`)
+- `AUDIT_SERVICE_URL` (default: `http://localhost:3009`)
+- `AUTH_TIMEOUT_MS` (default: `3000`)
+- `GATEWAY_PROXY_TIMEOUT_MS` (default: `8000`)
+- `EXPOSE_INTERNAL_ROUTES` (default: `false`)
 
 ### User Service (`http://localhost:3001`)
 
@@ -281,7 +315,7 @@ Audit Service env vars:
 - `AUTH_TIMEOUT_MS` (default: `3000`)
 - `AUDIT_INTERNAL_TOKEN` (optional shared token for `/internal/audit-logs`)
 
-Internal services remain available on their own ports for service-to-service calls.
+Client traffic should go through `http://localhost:3000`, while internal services remain available on their own ports for service-to-service calls.
 
 ---
 
@@ -289,6 +323,7 @@ Internal services remain available on their own ports for service-to-service cal
 
 Applied to all HTTP services:
 
+- API Gateway
 - User Service
 - Cart Service
 - Order Service
@@ -390,7 +425,6 @@ Apply each service schema in its own database:
 
 ## Future Features
 
-- API Gateway as a single entry point for routing and auth forwarding
 - Centralized tracing/logging stack (OpenTelemetry + Grafana/Prometheus + ELK)
 - Fraud/Risk scoring workflow for suspicious orders and payments
 
@@ -402,6 +436,8 @@ Apply each service schema in its own database:
 2. Ensure MySQL is running.
 3. Create service databases and apply each `schema.sql`.
 4. Create `.env` in each service:
+
+   - `API-Gateway/.env` (you can copy from `API-Gateway/.env.example`)
    - `User-Service/.env`
    - `Cart-Service/.env`
    - `Order-Service/.env`
@@ -411,8 +447,9 @@ Apply each service schema in its own database:
    - `Payment-Service/.env`
    - `Notification-Service/.env`
    - `Audit-Service/.env`
-
 5. Run HTTP services:
+
+   - `API-Gateway`
    - `User-Service`
    - `Cart-Service`
    - `Order-Service`
@@ -422,8 +459,9 @@ Apply each service schema in its own database:
    - `Payment-Service`
    - `Notification-Service`
    - `Audit-Service`
-
 6. Verify health checks:
+
+   - `GET http://localhost:3000/health`
    - `GET http://localhost:3001/health`
    - `GET http://localhost:3002/health`
    - `GET http://localhost:3003/health`
@@ -437,6 +475,7 @@ Apply each service schema in its own database:
 Run commands:
 
 ```bash
+cd API-Gateway && npm install && npm run dev
 cd User-Service && npm install && npm run dev
 cd Cart-Service && npm install && npm run dev
 cd Order-Service && npm install && npm run dev
