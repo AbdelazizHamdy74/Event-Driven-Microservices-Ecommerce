@@ -4,8 +4,10 @@ const cors = require("cors");
 const { createObservability } = require("../../shared/http/observability");
 const { createRateLimiter } = require("../../shared/http/rateLimit");
 const { securityHeaders } = require("../../shared/http/security");
+const { resolveCorsSettings } = require("../../shared/http/cors");
 const { notFoundHandler, errorHandler } = require("../../shared/http/errors");
 const { env } = require("./config/env");
+const { buildFrontendCatalog } = require("./config/frontendCatalog");
 const { createAuthForwardingMiddleware } = require("./middlewares/authForwarding.middleware");
 const { createProxyMiddleware } = require("./middlewares/proxy.middleware");
 
@@ -13,11 +15,14 @@ const app = express();
 let server;
 const { requestLogger, healthHandler, metricsHandler } =
   createObservability("api-gateway");
+const { options: corsOptions, metadata: corsMetadata } = resolveCorsSettings(
+  process.env,
+);
 
 app.set("trust proxy", true);
 app.disable("x-powered-by");
 app.use(express.json({ limit: "300kb" }));
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(securityHeaders);
 app.use(
   createRateLimiter({
@@ -29,6 +34,17 @@ app.use(requestLogger);
 
 app.get("/health", healthHandler);
 app.get("/metrics", metricsHandler);
+app.get("/frontend/catalog", (req, res) => {
+  const host = req.get("host") || `localhost:${env.port}`;
+  res.json(
+    buildFrontendCatalog({
+      port: env.port,
+      runtimeBaseUrl: `${req.protocol}://${host}`,
+      exposeInternalRoutes: env.exposeInternalRoutes,
+      cors: corsMetadata,
+    }),
+  );
+});
 
 app.use(
   createAuthForwardingMiddleware({

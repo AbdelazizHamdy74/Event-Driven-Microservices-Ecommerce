@@ -133,6 +133,7 @@ Kafka topic consumers:
   - Audit (read): `/audit/*`
 - `GET /health`
 - `GET /metrics`
+- `GET /frontend/catalog` (frontend-facing API contract and auth/cors metadata)
 - Internal routes containing `/internal` are blocked by default (`EXPOSE_INTERNAL_ROUTES=false`)
 
 API Gateway env vars:
@@ -150,6 +151,12 @@ API Gateway env vars:
 - `AUTH_TIMEOUT_MS` (default: `3000`)
 - `GATEWAY_PROXY_TIMEOUT_MS` (default: `8000`)
 - `EXPOSE_INTERNAL_ROUTES` (default: `false`)
+- `CORS_ALLOWED_ORIGINS` (default: `http://localhost:4200,http://127.0.0.1:4200`)
+- `CORS_ALLOW_CREDENTIALS` (default: `true`)
+- `CORS_ALLOWED_METHODS` (default: `GET,POST,PUT,PATCH,DELETE,OPTIONS`)
+- `CORS_ALLOWED_HEADERS` (default: `Authorization,Content-Type,X-Requested-With,X-Request-Id,X-Audit-Token`)
+- `CORS_EXPOSED_HEADERS` (default: `X-Request-Id,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset,Retry-After`)
+- `CORS_MAX_AGE_SECONDS` (default: `86400`)
 
 ### User Service (`http://localhost:3001`)
 
@@ -317,6 +324,13 @@ Audit Service env vars:
 
 Client traffic should go through `http://localhost:3000`, while internal services remain available on their own ports for service-to-service calls.
 
+### Angular Frontend Readiness
+
+- Frontend should call only API Gateway (`http://localhost:3000`) instead of calling microservices directly.
+- Use `GET /frontend/catalog` to fetch an up-to-date route/auth/cors contract for Angular services and guards.
+- Keep JWT in `Authorization: Bearer <token>` for protected routes.
+- CORS is now centrally configurable on every HTTP service via the `CORS_*` environment variables listed above.
+
 ---
 
 ## Monitoring, Logging, and Runtime Safety (Implemented)
@@ -360,6 +374,12 @@ Environment variables:
 - `AUDIT_ACTIVITY_ENABLED` (default: `true`)
 - `AUDIT_TIMEOUT_MS` (default: `800`)
 - `AUDIT_INTERNAL_TOKEN` (optional; if set it is sent as `x-audit-token`)
+- `CORS_ALLOWED_ORIGINS` (default: `http://localhost:4200,http://127.0.0.1:4200`)
+- `CORS_ALLOW_CREDENTIALS` (default: `true`)
+- `CORS_ALLOWED_METHODS` (default: `GET,POST,PUT,PATCH,DELETE,OPTIONS`)
+- `CORS_ALLOWED_HEADERS` (default: `Authorization,Content-Type,X-Requested-With,X-Request-Id,X-Audit-Token`)
+- `CORS_EXPOSED_HEADERS` (default: `X-Request-Id,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset,Retry-After`)
+- `CORS_MAX_AGE_SECONDS` (default: `86400`)
 
 ### Security Enhancements
 

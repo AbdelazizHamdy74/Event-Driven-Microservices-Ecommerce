@@ -23,7 +23,7 @@ const toBoolean = (value, fallback = false) => {
 };
 
 const env = {
-  port: toPositiveNumber(process.env.PORT, 3010),
+  port: toPositiveNumber(process.env.PORT, 3000),
   authTimeoutMs: toPositiveNumber(process.env.AUTH_TIMEOUT_MS, 3000),
   proxyTimeoutMs: toPositiveNumber(process.env.GATEWAY_PROXY_TIMEOUT_MS, 8000),
   rateLimitWindowMs: toPositiveNumber(process.env.RATE_LIMIT_WINDOW_MS, 60000),

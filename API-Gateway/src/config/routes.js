@@ -112,6 +112,9 @@ const resolveRouteTarget = (pathname, serviceUrls) => {
 };
 
 module.exports = {
+  ROUTE_TARGETS,
+  PUBLIC_RULES,
+  PROTECTED_RULES,
   normalizePathname,
   isInternalPath,
   resolveAuthPolicy,

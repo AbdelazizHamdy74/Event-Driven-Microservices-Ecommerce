@@ -9,6 +9,7 @@ const { startDomainEventsConsumer } = require("./events/domainEvents.consumer");
 const { createObservability } = require("../../shared/http/observability");
 const { createRateLimiter } = require("../../shared/http/rateLimit");
 const { securityHeaders } = require("../../shared/http/security");
+const { resolveCorsSettings } = require("../../shared/http/cors");
 const { notFoundHandler, errorHandler } = require("../../shared/http/errors");
 
 const app = express();
@@ -20,10 +21,11 @@ const { requestLogger, healthHandler, metricsHandler } = createObservability(
     disableAuditActivity: true,
   },
 );
+const { options: corsOptions } = resolveCorsSettings(process.env);
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "300kb" }));
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(securityHeaders);
 const rateLimiter = createRateLimiter({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
